@@ -1,0 +1,9 @@
+10:02:09 INFO  writer.py:71 starting write-load phase, target 10000 docs
+10:02:11 INFO  writer.py:80 progress checkpoint: 4200 docs written
+10:02:48 ERROR writer.py:88 write rejected (FORBIDDEN/8/index read-only / allow delete (api))
+10:02:48 WARN  writer.py:90 backing off, will retry
+10:02:49 ERROR client.py:140 context deadline exceeded on write
+10:02:50 ERROR client.py:140 context deadline exceeded on write
+10:02:51 ERROR client.py:140 context deadline exceeded on write
+10:03:30 ERROR client.py:140 context deadline exceeded on write
+10:04:10 INFO  runner.py:210 phase write-load failed after 1 of 1 assertions
