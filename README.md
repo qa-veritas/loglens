@@ -1,5 +1,7 @@
 # loglens
 
+[![ci](https://github.com/qa-veritas/loglens/actions/workflows/ci.yml/badge.svg)](https://github.com/qa-veritas/loglens/actions/workflows/ci.yml)
+
 **Code-aware log intelligence: slice a huge log, find the first error,
 and correlate every `file:line` token back to the source that emitted
 it.**

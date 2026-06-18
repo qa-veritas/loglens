@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from loglens.brief import build_brief
 from loglens.correlate import CorrelationError, code_context, find_source
