@@ -1,115 +1,111 @@
-# loglens
+# LogLens
 
+> **Code-aware evidence: read what the code emitted, not just the line.**
+
+[![QA Veritas](https://img.shields.io/badge/QA_Veritas-AI--Native_Verification_Engineering-0b3d91)](https://github.com/qa-veritas)
+[![layer](https://img.shields.io/badge/layer-Reasoning-8957e5)](https://github.com/qa-veritas)
 [![ci](https://github.com/qa-veritas/loglens/actions/workflows/ci.yml/badge.svg)](https://github.com/qa-veritas/loglens/actions/workflows/ci.yml)
 
-**Code-aware log intelligence: slice a huge log, find the first error,
-and correlate every `file:line` token back to the source that emitted
-it.**
+*A component of [**QA Veritas**](https://github.com/qa-veritas) — an exploration of how AI agents reason about, verify, and operate complex systems.*
 
-A multi-gigabyte run log is too big to read and too important to skip.
-The instinct — `grep -i error | tail` — fails twice: it surfaces the
-*loudest* error instead of the *first* one, and it tells you a line was
-emitted at `writer.py:88` without telling you what `writer.py:88`
-actually does. `loglens` fixes both.
+---
 
-It streams the log once (constant memory, never the whole file in RAM),
-finds the first error and the last progress checkpoint, clusters the
-repeated noise, and — the part that matters — resolves each `file:line`
-token against your source tree so you read the *code that emitted the
-line*, not just the line.
+## Problem
 
-The output is a small tiered brief (a few KB) with byte offsets back
-into the raw log for drill-down. You read the brief; you only open the
-raw log at the exact offset when you need to.
+A multi-gigabyte run log is too big to read and too important to skip. The reflex — `grep -i error | tail` — fails twice. It surfaces the **loudest** error (the one repeated 400 times downstream) instead of the **first** one. And it tells you a line came from `writer.py:88` without telling you what `writer.py:88` *does* — so you're triaging a string, blind to the code that produced it. Feeding the whole log to a model is worse: it's expensive, it blows the context window, and it still doesn't know what the emitting code meant.
 
-## Install
+## Core Idea
 
-```bash
-pip install -e .
-python -m loglens --help
+Logs are emitted by code, so evidence should point back at code. LogLens streams the log **once** in constant memory, finds the first error and the last progress checkpoint, clusters the repeated noise, and — the part that matters — resolves every `file:line` token against your source tree, so you read the *code that emitted the line*. The output is a small tiered brief (a few KB) with byte offsets back into the raw log, so you open the giant file only at the exact spot you need.
+
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+    L[(multi-GB log)] --> SC[Stream once<br/>constant memory]
+    SC --> FE[First error<br/>+ last progress]
+    SC --> CL[Cluster the noise]
+    SC --> TK[Extract file:line<br/>tokens]
+    TK --> CO[Correlate to<br/>source tree]
+    SRC[(source tree)] --> CO
+    FE --> BR[Tiered brief<br/>+ byte offsets]
+    CL --> BR
+    CO --> BR
+    BR -. drill down .-> L
 ```
 
-Python 3.10+, no third-party runtime dependencies.
+## Concepts
 
-## Use
+- **First error over loudest** — the cause is usually quiet and early; the cascade is loud and late.
+- **Code correlation** — a `path:line` token is matched by path suffix (so `writer.py:88` resolves whether the tree has `writer.py` or `app/io/writer.py`), then the emitting line plus context is extracted. Ambiguous matches are reported, never guessed.
+- **Tiered evidence** — a brief small enough to reason over, with byte ranges that make the raw log *randomly addressable* instead of a wall to scroll.
+- **Constant memory** — the file is streamed, never loaded; the technique survives logs that don't fit in RAM.
 
-```bash
-# The headline: a tiered brief that correlates errors to source
-python -m loglens brief --log examples/run.log --source examples/src
+## Examples
 
-# Resolve one file:line token to its code
-python -m loglens correlate --token writer.py:88 --source examples/src
-
-# Pull a window around a line for drill-down
-python -m loglens slice --log examples/run.log --around 3 --context 4
-
-# Raw scan summary (first error, last progress, clusters)
-python -m loglens scan --log examples/run.log
-```
-
-### Example brief
+The headline output — the moment a line becomes evidence:
 
 ```
-# Log brief  (examples/run.log — 9 lines, 612 bytes)
-
-class: INFRA (first error is an environment rejection, not an assertion)
-
-timeline:
-  last progress  L2   progress checkpoint: 4200 docs written
-  first error    L3   write rejected (FORBIDDEN/8/index read-only ...)
-  cascade        L5+  context deadline exceeded  x4
-
 emitting code:
   writer.py:88  ->  examples/src/writer.py:88
       87  if resp.status == 403:
    >  88      raise WriteRejected("index is read-only (flood-stage guard)")
       89  # this is a capacity guard, not a permissions error
-
-error clusters:
-  write rejected (FORBIDDEN/#/index read-only ...)   x1   (first)
-  context deadline exceeded on write                 x4
 ```
 
-That last block is the difference between "an error happened at line 88"
-and "line 88 is a capacity guard, so this is INFRA, not a permissions
-bug."
+That block is the difference between *"an error happened at line 88"* and *"line 88 is a capacity guard, so this is an INFRA condition, not a permissions bug."*
 
-## How the correlation works
+## Quick Start
 
-Every `path:line` token in the log is matched against the source tree by
-path suffix (so `writer.py:88` resolves whether the tree has
-`writer.py` or `app/io/writer.py`). The matched line plus a few lines of
-context are extracted. Ambiguous matches are reported, not guessed.
+```bash
+pip install -e .          # or: python -m loglens --help
 
-## Layout
-
-```
-loglens/
-  loglens/
-    __init__.py
-    scan.py        # stream a log: first error, last progress, clusters, tokens
-    correlate.py   # file:line token -> source file + code context
-    slice.py       # line/byte windows for drill-down
-    brief.py       # assemble the tiered brief
-    cli.py         # brief / correlate / slice / scan
-  examples/
-    run.log
-    src/writer.py
-    src/client.py
-  tests/
-  LICENSE
-  pyproject.toml
+python -m loglens brief --log examples/run.log --source examples/src   # the headline
+python -m loglens correlate --token writer.py:88 --source examples/src # one token → code
+python -m loglens scan --log examples/run.log                          # raw scan summary
 ```
 
-## Roadmap
+Python 3.10+, zero third-party runtime dependencies.
 
-- HTTP range-request backend so the same brief works against a remote
-  multi-GB log without downloading it.
-- A `--since`/`--window` time filter to bound the scan to a phase.
+## Why It Matters
+
+For **engineers**: the slowest part of triage — "what does this line even mean?" — collapses when the brief already shows the emitting code. You read kilobytes, not gigabytes.
+
+For **AI agents**: this is how you give a model log evidence it can actually reason about. Instead of pasting a gigabyte and paying for tokens it can't use, you hand it a code-grounded brief: the first error, the cluster shape, and the source that emitted it. It pairs directly with [State Triage](https://github.com/qa-veritas/state-triage) as the evidence stage of a reasoning pipeline.
+
+## Future Vision
+
+- An HTTP range-request backend so the same brief works against a remote multi-GB log without downloading it.
+- A time-window filter to bound a scan to one phase.
 - Pluggable signature normalizers per log format.
-- Cross-reference the emitting commit (git blame) so a brief points at
-  the change that introduced the line.
+- Cross-reference the emitting commit (blame) so a brief points at the change that introduced the line.
 
-## License
+---
 
-MIT. See [LICENSE](LICENSE).
+## Part of QA Veritas
+
+**QA Veritas** explores *AI-Native Verification Engineering* — practical patterns for a future where humans and AI agents operate complex systems together. Every component serves one loop:
+
+**Memory → Reasoning → Verification → Action**
+
+```
+QA Veritas
+├── Resource Ledger                    Memory       operational truth as a git tree
+├── State Triage                       Reasoning    deterministic triage around an agent
+├── LogLens           ◀ you are here   Reasoning    code-aware evidence from logs
+├── Intent Verify                      Verification declarative intent → observable proof
+├── Runbook Forge                      Runbooks     procedures derived from verified history
+├── SkillPack                          Skills       progressive-disclosure agent capability
+└── Future Agents                      Agents       narrow operators that compose the above
+```
+
+| Layer | Component |
+|-------|-----------|
+| Memory | [Resource Ledger](https://github.com/qa-veritas/resource-ledger) |
+| **Reasoning** | [State Triage](https://github.com/qa-veritas/state-triage) · **LogLens** (this repo) |
+| Verification | [Intent Verify](https://github.com/qa-veritas/intent-verify) |
+| Runbooks | [Runbook Forge](https://github.com/qa-veritas/runbook-forge) |
+| Skills | [SkillPack](https://github.com/qa-veritas/skillpack) |
+| Writing | [Field notes & essays](https://github.com/qa-veritas/writing) |
+
+Start at the [platform overview](https://github.com/qa-veritas). MIT licensed.

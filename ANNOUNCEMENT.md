@@ -1,33 +1,16 @@
-# LinkedIn announcement — loglens
+# LinkedIn announcement — LogLens
 
-`grep -i error | tail` on a multi-gigabyte run log fails you twice. It
-surfaces the *loudest* error instead of the *first* one — and one
-rejected write becomes 200 timeout lines, so you debug the timeouts. And
-it tells you a line came from `writer.py:88` without telling you what
-`writer.py:88` does.
+---
 
-`loglens` is code-aware log intelligence. It streams the log once
-(constant memory, never the whole file in RAM), finds the first error
-and the last progress checkpoint, clusters the repeated noise, and — the
-part that earns its keep — resolves every `file:line` token against your
-source tree so you read the *code that emitted the line*.
+`grep -i error | tail` on a multi-gigabyte log fails twice. It surfaces the loudest error — the one repeated 400 times downstream — instead of the first one. And it tells you a line came from `writer.py:88` without telling you what `writer.py:88` actually does. You end up triaging a string, blind to the code that produced it.
 
-That last step changes the diagnosis. The raw error is "FORBIDDEN —
-index read-only," which reads like a permissions bug. Correlate it to
-the source and line 88 is a flood-stage capacity guard. It's not a
-permissions bug; it's a full disk. Same log line, opposite root cause —
-and the only way to know is to look at the code.
+Logs are emitted by code, so evidence should point back at code. LogLens streams the log once in constant memory, finds the first error and last progress checkpoint, clusters the noise, and resolves every `file:line` token against the source tree — so you read the line *and* the function that raised it. Output is a few-KB brief with byte offsets, so you open the giant file only at the exact spot you need.
 
-The output is a few-KB tiered brief with byte offsets back into the raw
-log. You read the brief; you only seek into the raw bytes at the exact
-offset when you actually need to.
+That's the difference between "an error at line 88" and "line 88 is a capacity guard, so this is infra, not a permissions bug."
 
-The principle: logs are emitted by code, so log analysis should be
-code-aware. Treat `file:line` as a join key between the log and the
-repository.
+This is the evidence half of the **Reasoning** layer in QA Veritas — a platform exploring how AI agents reason about, verify, and operate complex systems. It hands a model evidence it can actually reason over, instead of a gigabyte it can't.
 
-Python, no runtime deps, MIT.
+Repo + write-up in the comments.
 
-Repo: github.com/qa-veritas/loglens
-
-#observability #sre #debugging #aiengineering
+---
+*First comment:* Repo: github.com/qa-veritas/loglens · Platform: github.com/qa-veritas
